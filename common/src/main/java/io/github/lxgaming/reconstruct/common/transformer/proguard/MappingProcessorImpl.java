@@ -31,8 +31,10 @@ public class MappingProcessorImpl implements MappingProcessor {
     @Override
     public boolean processClassMapping(String className, String newClassName) {
         currentClass = Reconstruct.getInstance().getOrCreateClass(className);
+        String previousObfuscatedName = currentClass.getAttribute(Attributes.OBFUSCATED_NAME).orElse(null);
         currentClass.setAttribute(Attributes.OBFUSCATED_NAME, newClassName);
         currentClass.update();
+        Reconstruct.getInstance().updateClassIndexes(currentClass, previousObfuscatedName);
         return true;
     }
 

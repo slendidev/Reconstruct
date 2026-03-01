@@ -27,18 +27,19 @@ import org.objectweb.asm.Handle;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.commons.Remapper;
 
-import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
+import java.util.Map;
 import java.util.Set;
-import java.util.function.Predicate;
 
 public class RemapperImpl extends Remapper {
 
-    private final Set<RcClass> cachedClasses;
+    private final Map<String, RcClass> cachedClasses;
+    private final Set<String> missingClasses;
 
     public RemapperImpl() {
-        this.cachedClasses = new HashSet<>();
+        this.cachedClasses = new HashMap<>();
+        this.missingClasses = new HashSet<>();
     }
 
     @Override
@@ -104,16 +105,29 @@ public class RemapperImpl extends Remapper {
     }
 
     public RcClass getClass(String name, Attribute.Key<String> attribute) {
-        RcClass cachedClass = getCachedClass(rcClass -> rcClass.getAttribute(attribute).map(name::equals).orElse(false));
-        if (cachedClass != null) {
-            return cachedClass;
+        if (attribute.equals(Attributes.OBFUSCATED_NAME)) {
+            RcClass cachedClass = cachedClasses.get(name);
+            if (cachedClass != null) {
+                return cachedClass;
+            }
+
+            if (missingClasses.contains(name)) {
+                return null;
+            }
         }
 
         RcClass currentClass = Reconstruct.getInstance().getClass(name, attribute).orElse(null);
         if (currentClass != null) {
-            cachedClasses.add(currentClass);
+            if (attribute.equals(Attributes.OBFUSCATED_NAME)) {
+                cachedClasses.put(name, currentClass);
+            }
+
             Reconstruct.getInstance().getLogger().trace("Class {} -> {}", name, currentClass.getName());
             return currentClass;
+        }
+
+        if (attribute.equals(Attributes.OBFUSCATED_NAME)) {
+            missingClasses.add(name);
         }
 
         return null;
@@ -133,20 +147,5 @@ public class RemapperImpl extends Remapper {
                 return alternativeDescriptor.equals(descriptor);
             }).orElse(false);
         });
-    }
-
-    private RcClass getCachedClass(Predicate<RcClass> predicate) {
-        return Toolbox.getFirst(getCachedClasses(predicate));
-    }
-
-    private List<RcClass> getCachedClasses(Predicate<RcClass> predicate) {
-        List<RcClass> classes = new ArrayList<>();
-        for (RcClass rcClass : this.cachedClasses) {
-            if (predicate.test(rcClass)) {
-                classes.add(rcClass);
-            }
-        }
-
-        return classes;
     }
 }

@@ -63,10 +63,10 @@ public class TransformTask extends Task {
             } else {
                 writeTask.queue(Toolbox.toFileName(name), bytes);
             }
-
-            consumer.accept(this);
         } catch (Exception ex) {
             Reconstruct.getInstance().getLogger().error("Encountered an error while transforming {}", name, ex);
+        } finally {
+            consumer.accept(this);
         }
     }
 }

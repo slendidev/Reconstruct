@@ -281,3 +281,5 @@ $RECYCLE.BIN/
 .idea/
 run/
 build.ps1
+
+.direnv

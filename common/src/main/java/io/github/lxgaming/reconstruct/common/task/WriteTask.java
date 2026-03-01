@@ -21,7 +21,6 @@ import io.github.lxgaming.reconstruct.common.Reconstruct;
 import io.github.lxgaming.reconstruct.common.entity.ByteArrayZipEntry;
 import io.github.lxgaming.reconstruct.common.util.IOUtils;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -47,7 +46,7 @@ public class WriteTask extends Task {
     public WriteTask(Path path) {
         this.path = path;
         this.paths = new HashSet<>();
-        this.queue = new LinkedBlockingQueue<>(250);
+        this.queue = new LinkedBlockingQueue<>(1024);
         this.state = new AtomicBoolean(false);
     }
 
@@ -63,9 +62,13 @@ public class WriteTask extends Task {
         try (JarOutputStream outputStream = new JarOutputStream(new FileOutputStream(path.toFile()))) {
             outputStream.setMethod(ZipEntry.DEFLATED);
 
-            while (!queue.isEmpty() || getState().get()) {
-                ByteArrayZipEntry zipEntry = queue.poll(1L, TimeUnit.MILLISECONDS);
+            while (true) {
+                ByteArrayZipEntry zipEntry = queue.poll(50L, TimeUnit.MILLISECONDS);
                 if (zipEntry == null) {
+                    if (!getState().get() && queue.isEmpty()) {
+                        break;
+                    }
+
                     continue;
                 }
 
@@ -86,11 +89,9 @@ public class WriteTask extends Task {
     }
 
     private void writeZipEntry(ByteArrayZipEntry zipEntry, ZipOutputStream outputStream) throws Exception {
-        try (ByteArrayInputStream inputStream = new ByteArrayInputStream(zipEntry.getBytes())) {
-            outputStream.putNextEntry(zipEntry);
-            IOUtils.transferBytes(inputStream, outputStream);
-            outputStream.closeEntry();
-        }
+        outputStream.putNextEntry(zipEntry);
+        outputStream.write(zipEntry.getBytes());
+        outputStream.closeEntry();
     }
 
     public void queue(ZipEntry zipEntry, InputStream inputStream) throws InterruptedException, IOException {

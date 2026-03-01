@@ -41,10 +41,11 @@ import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 import java.util.jar.JarEntry;
@@ -64,16 +65,20 @@ public class Reconstruct {
     private final Logger logger;
     private final Config config;
     private final Set<RcClass> classes;
+    private final Map<String, RcClass> classesByName;
+    private final Map<String, RcClass> classesByObfuscatedName;
     private final AtomicBoolean state;
-    private final List<Task> tasks;
+    private final Set<Task> tasks;
 
     public Reconstruct(Config config) {
         instance = this;
         this.logger = LoggerFactory.getLogger(Reconstruct.NAME);
         this.config = config;
         this.classes = new HashSet<>();
+        this.classesByName = new ConcurrentHashMap<>();
+        this.classesByObfuscatedName = new ConcurrentHashMap<>();
         this.state = new AtomicBoolean(false);
-        this.tasks = new CopyOnWriteArrayList<>();
+        this.tasks = ConcurrentHashMap.newKeySet();
     }
 
     public void load() {
@@ -253,30 +258,38 @@ public class Reconstruct {
         return config;
     }
 
-    public RcClass getOrCreateClass(String name) {
-        return getClass(name).orElseGet(() -> {
-            RcClass object;
-            if (name.endsWith("[]")) {
-                RcClass type = getOrCreateClass(name.substring(0, name.length() - 2));
-                object = new RcArray();
-                ((RcArray) object).setType(type);
-            } else {
-                object = new RcClass();
-            }
+    public synchronized RcClass getOrCreateClass(String name) {
+        RcClass currentClass = classesByName.get(name);
+        if (currentClass != null) {
+            return currentClass;
+        }
 
-            object.setName(name);
-            object.update();
-            classes.add(object);
-            return object;
-        });
+        RcClass object;
+        if (name.endsWith("[]")) {
+            RcClass type = getOrCreateClass(name.substring(0, name.length() - 2));
+            object = new RcArray();
+            ((RcArray) object).setType(type);
+        } else {
+            object = new RcClass();
+        }
+
+        object.setName(name);
+        object.update();
+        classes.add(object);
+        updateClassIndexes(object, null);
+        return object;
     }
 
     public Optional<RcClass> getClass(String name, Attribute.Key<String> attribute) {
+        if (attribute.equals(Attributes.OBFUSCATED_NAME)) {
+            return Optional.ofNullable(classesByObfuscatedName.get(name));
+        }
+
         return Optional.ofNullable(getClass(rcClass -> rcClass.getAttribute(attribute).map(name::equals).orElse(false)));
     }
 
     public Optional<RcClass> getClass(String name) {
-        return Optional.ofNullable(getClass(rcClass -> rcClass.getName().equals(name)));
+        return Optional.ofNullable(classesByName.get(name));
     }
 
     public RcClass getClass(Predicate<RcClass> predicate) {
@@ -296,6 +309,17 @@ public class Reconstruct {
 
     public Set<RcClass> getClasses() {
         return classes;
+    }
+
+    public synchronized void updateClassIndexes(RcClass currentClass, String previousObfuscatedName) {
+        classesByName.put(currentClass.getName(), currentClass);
+        if (previousObfuscatedName != null) {
+            classesByObfuscatedName.remove(previousObfuscatedName, currentClass);
+        }
+
+        currentClass.getAttribute(Attributes.OBFUSCATED_NAME).ifPresent(obfuscatedName -> {
+            classesByObfuscatedName.put(obfuscatedName, currentClass);
+        });
     }
 
     public AtomicBoolean getState() {
